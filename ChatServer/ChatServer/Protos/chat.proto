@@ -1,0 +1,118 @@
+﻿syntax = "proto3";
+
+package chat;
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (AuthResponse);
+  rpc Login(LoginRequest) returns (AuthResponse);
+  rpc Refresh(RefreshRequest) returns (AuthResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+}
+
+service UserService {
+  rpc GetUsers(GetUsersRequest) returns (GetUsersResponse);
+}
+
+service ChatService {
+  rpc GetChats(GetChatsRequest) returns (GetChatsResponse);
+  rpc GetMessageHistory(GetMessageHistoryRequest) returns (GetMessageHistoryResponse);
+  rpc CreateChat(CreateChatRequest) returns (Chat);
+  rpc ChatStream(stream ClientToServerMessage) returns (stream ServerToClientMessage);
+}
+
+message User {
+  int32 id = 1;
+  string name = 2;
+  string public_key = 3;
+}
+
+message Chat {
+  int32 id = 1;
+  int32 sender_id = 2;
+  int32 receiver_id = 3;
+  bytes sender_encrypted_aes_key = 4;
+  bytes receiver_encrypted_aes_key = 5;
+}
+
+message Message {
+  int32 id = 1;
+  int32 sender_id = 2;
+  bytes aes_encrypted_content = 3;
+  int32 chat_id = 4;
+}
+
+message RegisterRequest {
+  string name = 1;
+  string password = 2;
+  string public_key = 3;
+}
+
+message LoginRequest {
+  string name = 1;
+  string password = 2;
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message LogoutRequest {}
+
+message LogoutResponse {
+  string message = 1;
+}
+
+message GetUsersRequest {
+  int32 page_size = 1;
+  optional int32 last_id = 2;
+}
+
+message GetUsersResponse {
+  repeated User users = 1;
+}
+
+message GetChatsRequest {
+  int32 page_size = 1;
+  optional int32 last_id = 2;
+}
+
+message GetChatsResponse {
+  repeated Chat chats = 1;
+}
+
+message GetMessageHistoryRequest {
+  int32 chat_id = 1;
+  int32 page_size = 2;
+  optional int32 last_id = 3;
+}
+
+message GetMessageHistoryResponse {
+  repeated Message messages = 1;
+}
+
+message CreateChatRequest {
+  int32 receiver_id = 1;
+  bytes receiver_encrypted_aes_key = 2;
+}
+
+message ClientToServerMessage {
+  oneof payload {
+    SendMessageRequest send_message = 1;
+  }
+}
+
+message SendMessageRequest {
+  int32 chat_id = 1;
+  bytes aes_encrypted_content = 2;
+}
+
+message ServerToClientMessage {
+  oneof payload {
+    Message new_message = 1;
+  }
+}
