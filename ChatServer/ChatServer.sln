@@ -2,6 +2,10 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChatServer", "ChatServer\ChatServer.csproj", "{76C26A05-C7A9-410A-8044-37A2E98F03D4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Domain", "Domain\Domain.csproj", "{DF8242B0-2220-44F1-B2F3-520979729E9E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure", "Infrastructure\Infrastructure.csproj", "{6080D440-F9AF-46AB-8E10-0D5A22BD93FE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +16,13 @@ Global
 		{76C26A05-C7A9-410A-8044-37A2E98F03D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{76C26A05-C7A9-410A-8044-37A2E98F03D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{76C26A05-C7A9-410A-8044-37A2E98F03D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DF8242B0-2220-44F1-B2F3-520979729E9E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DF8242B0-2220-44F1-B2F3-520979729E9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DF8242B0-2220-44F1-B2F3-520979729E9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DF8242B0-2220-44F1-B2F3-520979729E9E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6080D440-F9AF-46AB-8E10-0D5A22BD93FE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6080D440-F9AF-46AB-8E10-0D5A22BD93FE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6080D440-F9AF-46AB-8E10-0D5A22BD93FE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6080D440-F9AF-46AB-8E10-0D5A22BD93FE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
