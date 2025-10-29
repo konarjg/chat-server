@@ -97,7 +97,8 @@ message GetMessageHistoryResponse {
 
 message CreateChatRequest {
   int32 receiver_id = 1;
-  bytes receiver_encrypted_aes_key = 2;
+  bytes sender_encrypted_aes_key = 2;
+  bytes receiver_encrypted_aes_key = 3;
 }
 
 message ClientToServerMessage {

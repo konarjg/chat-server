@@ -2,7 +2,7 @@
 
 using Entities;
 using Exceptions;
-using Interfaces;
+using Interfaces;using Ports.Realtime;
 using Ports.Repositories;
 
 public class MessageService(IChatRepository chatRepository, IMessageRepository messageRepository, IUnitOfWork unitOfWork) : IMessageService {

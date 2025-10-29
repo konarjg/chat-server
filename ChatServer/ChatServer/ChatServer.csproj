@@ -18,4 +18,8 @@
         <Protobuf Include="Protos\chat.proto" GrpcServices="Server" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Domain\Domain.csproj" />
+    </ItemGroup>
+
 </Project>
