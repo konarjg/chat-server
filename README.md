@@ -4,51 +4,62 @@ This project is a gRPC-based chat server built with ASP.NET Core, following the 
 
 ## Architecture
 
-The application is divided into three main layers:
+The application is designed around a central **Domain Layer**, which contains the core business logic and is completely independent of any external technologies. This core is surrounded by an **Application Layer** and an **Infrastructure Layer**.
 
-*   **Domain:** This is the core of the application, containing the business logic and entities. It has no dependencies on any other layer.
-*   **Application:** This layer orchestrates the application's use cases, acting as a bridge between the outside world and the domain. In this project, the gRPC services in the `ChatServer` project serve as this layer.
-*   **Infrastructure:** This layer contains the concrete implementations of the interfaces (ports) defined in the domain layer. This includes things like database repositories, authentication services, and real-time messaging.
+-   **Domain Layer (The Hexagon)**: This is the heart of the application, containing the business logic, entities, and the all-important **Ports**. Ports are interfaces that define how the outside world can interact with the domain (inbound ports) and how the domain can interact with the outside world (outbound ports).
+
+-   **Application Layer (Driving Adapters)**: This layer contains the "driving" adapters that translate external requests into calls to the domain's inbound ports. In this project, the gRPC services act as the primary driving adapter.
+
+-   **Infrastructure Layer (Driven Adapters)**: This layer contains the "driven" adapters that provide concrete implementations for the domain's outbound ports. This includes database repositories, authentication services, and real-time messaging clients.
 
 This architecture is visualized in the diagram below:
 
 ```mermaid
-graph TD
-    subgraph " "
-        direction TB
-        subgraph "Application Layer (ChatServer)"
-            direction LR
-            A[gRPC Services] --> B{Domain Ports};
-        end
-        subgraph "Domain Layer"
-            direction LR
-            B --> C[Domain Logic];
-        end
-        subgraph "Infrastructure Layer"
-            direction LR
-            D[Infrastructure Adapters] --> B;
-        end
+graph TB
+  subgraph "Hexagonal Architecture"
+    direction TB
+    subgraph "<font size=5><b>Application Layer</b></font>"
+        style Application_Layer stroke:#4CAF50,stroke-width:2px
+        GRPC["gRPC Services (Adapter)"]
     end
-
-    subgraph "External"
-        direction LR
-        E[Clients] --> A;
-        D --> F[Database];
+    subgraph "<font size=5><b>Domain Layer</b></font>"
+        style Domain_Layer stroke:#FFC107,stroke-width:4px
+        Ports["<b>Ports</b><br/>(Service & Repository Interfaces)"]
+        Domain["Core Domain Logic & Entities"]
     end
+    subgraph "<font size=5><b>Infrastructure Layer</b></font>"
+        style Infrastructure_Layer stroke:#F44336,stroke-width:2px
+        Repos["Repositories (Adapter)"]
+        Auth["Auth Services (Adapter)"]
+        Realtime["Realtime (Adapter)"]
+    end
+  end
 
-    style B fill:#f9f,stroke:#333,stroke-width:2px
+  subgraph "External"
+    Clients(["Clients"])
+    DB[(Database)]
+  end
+
+  Clients --> GRPC
+  GRPC --> Ports
+  Ports -- defines --> Domain
+  Domain -- uses --> Ports
+  Repos --> Ports
+  Auth --> Ports
+  Realtime --> Ports
+  Repos --> DB
 ```
 
 ### Project Structure
 
-*   `ChatServer/`: The main project, containing the gRPC services and the application's entry point.
+*   `ChatServer/`: The main project, containing the gRPC services and the application's entry point (Application Layer).
     *   `Protos/`: The gRPC service definitions (`.proto` files).
     *   `Services/`: The gRPC service implementations.
-*   `Domain/`: The core of the application.
+*   `Domain/`: The core of the application (Domain Layer).
     *   `Entities/`: The domain entities.
-    *   `Interfaces/`: The domain service interfaces.
-    *   `Ports/`: The interfaces for the infrastructure layer (repositories, etc.).
-*   `Infrastructure/`: The implementation of the domain's ports.
+    *   `Interfaces/`: The inbound port definitions.
+    *   `Ports/`: The outbound port definitions.
+*   `Infrastructure/`: The implementation of the domain's ports (Infrastructure Layer).
     *   `Repositories/`: The database repository implementations.
     *   `Auth/`: The authentication service implementations.
     *   `Realtime/`: The real-time messaging implementation.
@@ -114,59 +125,46 @@ string accessToken = loginResponse.AccessToken;
 string refreshToken = loginResponse.RefreshToken;
 Console.WriteLine("Logged in successfully!");
 
-// --- 3. Making Authenticated Calls ---
+// --- 3. Making Authenticated Calls & Pagination ---
 var headers = new Metadata { { "Authorization", $"Bearer {accessToken}" } };
-var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest { PageSize = 10 }, headers);
+var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest { PageSize = 1 }, headers);
+Console.WriteLine($"Found {usersResponse.Users.Count} user(s) on the first page.");
+
+if (usersResponse.Users.Count > 0)
+{
+    int lastId = usersResponse.Users.Last().Id;
+    var nextPageRequest = new GetUsersRequest { PageSize = 1, LastId = lastId };
+    var nextPageResponse = await userClient.GetUsersAsync(nextPageRequest, headers);
+    Console.WriteLine($"Found {nextPageResponse.Users.Count} user(s) on the next page.");
+}
+
 var otherUser = usersResponse.Users.FirstOrDefault(u => u.Name == "anotheruser");
-Console.WriteLine($"Found {usersResponse.Users.Count} users.");
 
 // --- 4. Chat Operations ---
 if (otherUser != null)
 {
     // Create a chat
-    var createChatRequest = new CreateChatRequest
-    {
-        ReceiverId = otherUser.Id,
-        SenderEncryptedAesKey = ByteString.CopyFrom(new byte[32]),
-        ReceiverEncryptedAesKey = ByteString.CopyFrom(new byte[32])
-    };
+    var createChatRequest = new CreateChatRequest { ReceiverId = otherUser.Id, SenderEncryptedAesKey = ByteString.CopyFrom(new byte[32]), ReceiverEncryptedAesKey = ByteString.CopyFrom(new byte[32]) };
     var chat = await chatClient.CreateChatAsync(createChatRequest, headers);
     Console.WriteLine($"Created chat with ID: {chat.Id}");
 
-    // Get message history (will be empty)
-    var historyRequest = new GetMessageHistoryRequest { ChatId = chat.Id, PageSize = 20 };
-    var historyResponse = await chatClient.GetMessageHistoryAsync(historyRequest, headers);
-    Console.WriteLine($"Initial message count: {historyResponse.Messages.Count}");
-
     // --- 5. Real-time Chat Stream ---
     using var call = chatClient.ChatStream(headers);
-
-    // Task to receive messages from the server
-    var readTask = Task.Run(async () =>
-    {
-        await foreach (var message in call.ResponseStream.ReadAllAsync())
-        {
+    var readTask = Task.Run(async () => {
+        await foreach (var message in call.ResponseStream.ReadAllAsync()) {
             Console.WriteLine($"Received message: {message.NewMessage.AesEncryptedContent.ToStringUtf8()}");
         }
     });
-
-    // Send a message
-    var sendMessageRequest = new SendMessageRequest { ChatId = chat.Id, AesEncryptedContent = ByteString.CopyFromUtf8("Hello, world!") };
-    await call.RequestStream.WriteAsync(new ClientToServerMessage { SendMessage = sendMessageRequest });
-
-    await Task.Delay(1000); // Wait for message to be received
-
+    await call.RequestStream.WriteAsync(new ClientToServerMessage { SendMessage = new SendMessageRequest { ChatId = chat.Id, AesEncryptedContent = ByteString.CopyFromUtf8("Hello!") } });
+    await Task.Delay(1000);
     await call.RequestStream.CompleteAsync();
     await readTask;
 }
 
-// --- 6. Refreshing the Access Token ---
+// --- 6. Refreshing and Logging Out ---
 var refreshResponse = await authClient.RefreshAsync(new RefreshRequest { RefreshToken = refreshToken });
-accessToken = refreshResponse.AccessToken;
 Console.WriteLine("Token refreshed!");
-
-// --- 7. Logging Out ---
-await authClient.LogoutAsync(new LogoutRequest { RefreshToken = refreshToken });
+await authClient.LogoutAsync(new LogoutRequest { RefreshToken = refreshResponse.RefreshToken });
 Console.WriteLine("Logged out.");
 ```
 
@@ -176,7 +174,6 @@ Console.WriteLine("Logged out.");
 import grpc
 import chat_pb2
 import chat_pb2_grpc
-import threading
 import time
 
 # --- 1. Setup ---
@@ -193,41 +190,36 @@ access_token = login_response.access_token
 refresh_token = login_response.refresh_token
 print("Logged in successfully!")
 
-# --- 3. Making Authenticated Calls ---
+# --- 3. Making Authenticated Calls & Pagination ---
 auth_metadata = [('authorization', f'Bearer {access_token}')]
-users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(page_size=10), metadata=auth_metadata)
+users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(page_size=1), metadata=auth_metadata)
+print(f"Found {len(users_response.users)} user(s) on the first page.")
+
+if len(users_response.users) > 0:
+    last_id = users_response.users[-1].id
+    next_page_request = chat_pb2.GetUsersRequest(page_size=1, last_id=last_id)
+    next_page_response = user_stub.GetUsers(next_page_request, metadata=auth_metadata)
+    print(f"Found {len(next_page_response.users)} user(s) on the next page.")
+
 other_user = next((u for u in users_response.users if u.name == "anotheruser"), None)
-print(f"Found {len(users_response.users)} users.")
 
 # --- 4. Chat Operations ---
 if other_user:
-    # Create a chat
     create_chat_request = chat_pb2.CreateChatRequest(receiver_id=other_user.id, sender_encrypted_aes_key=b'x'*32, receiver_encrypted_aes_key=b'y'*32)
     chat = chat_stub.CreateChat(create_chat_request, metadata=auth_metadata)
     print(f"Created chat with ID: {chat.id}")
 
-    # Get message history
-    history_request = chat_pb2.GetMessageHistoryRequest(chat_id=chat.id, page_size=20)
-    history_response = chat_stub.GetMessageHistory(history_request, metadata=auth_metadata)
-    print(f"Initial message count: {len(history_response.messages)}")
-
     # --- 5. Real-time Chat Stream ---
     def send_messages():
-        time.sleep(1) # wait for receiver to be ready
-        message = chat_pb2.SendMessageRequest(chat_id=chat.id, aes_encrypted_content=b"Hello from Python!")
-        yield chat_pb2.ClientToServerMessage(send_message=message)
+        time.sleep(1)
+        yield chat_pb2.ClientToServerMessage(send_message=chat_pb2.SendMessageRequest(chat_id=chat.id, aes_encrypted_content=b"Hello!"))
 
-    responses = chat_stub.ChatStream(send_messages(), metadata=auth_metadata)
-    for response in responses:
+    for response in chat_stub.ChatStream(send_messages(), metadata=auth_metadata):
         print(f"Received message: {response.new_message.aes_encrypted_content.decode('utf-8')}")
 
-# --- 6. Refreshing the Access Token ---
+# --- 6. Refreshing and Logging Out ---
 refresh_response = auth_stub.Refresh(chat_pb2.RefreshRequest(refresh_token=refresh_token))
-access_token = refresh_response.access_token
-print("Token refreshed!")
-
-# --- 7. Logging Out ---
-auth_stub.Logout(chat_pb2.LogoutRequest(refresh_token=refresh_token))
+auth_stub.Logout(chat_pb2.LogoutRequest(refresh_token=refresh_response.refresh_token))
 print("Logged out.")
 ```
 
@@ -238,7 +230,6 @@ import io.grpc.*;
 import io.grpc.stub.StreamObserver;
 import chat.Chat.*;
 import chat.AuthServiceGrpc;
-import chat.ChatServiceGrpc;
 import chat.UserServiceGrpc;
 import com.google.protobuf.ByteString;
 import java.util.concurrent.CountDownLatch;
@@ -259,13 +250,13 @@ final String accessToken = loginResponse.getAccessToken();
 String refreshToken = loginResponse.getRefreshToken();
 System.out.println("Logged in successfully!");
 
-// --- 3. Authenticated Stubs ---
+// --- 3. Authenticated Stubs & Pagination ---
 ClientInterceptor authInterceptor = new ClientInterceptor() {
-    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
-        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(next.newCall(method, callOptions)) {
-            public void start(Listener<RespT> responseListener, Metadata headers) {
-                headers.put(Metadata.Key.of("Authorization", Metadata.ASCII_STRING_MARSHALLER), "Bearer " + accessToken);
-                super.start(responseListener, headers);
+    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(MethodDescriptor<ReqT, RespT> method, CallOptions o, Channel n) {
+        return new ForwardingClientCall.SimpleForwardingClientCall<>(n.newCall(method, o)) {
+            public void start(Listener<RespT> res, Metadata h) {
+                h.put(Metadata.Key.of("Authorization", Metadata.ASCII_STRING_MARSHALLER), "Bearer " + accessToken);
+                super.start(res, h);
             }
         };
     }
@@ -274,42 +265,34 @@ UserServiceGrpc.UserServiceBlockingStub authedUserStub = userStub.withIntercepto
 ChatServiceGrpc.ChatServiceBlockingStub authedChatStub = chatStub.withInterceptors(authInterceptor);
 ChatServiceGrpc.ChatServiceStub authedAsyncChatStub = asyncChatStub.withInterceptors(authInterceptor);
 
-// --- 4. Chat Operations ---
-GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(10).build());
+GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(1).build());
+System.out.println("Found " + usersResponse.getUsersCount() + " user(s) on the first page.");
+
+if (usersResponse.getUsersCount() > 0) {
+    int lastId = usersResponse.getUsers(usersResponse.getUsersCount() - 1).getId();
+    GetUsersResponse nextPage = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(1).setLastId(lastId).build());
+    System.out.println("Found " + nextPage.getUsersCount() + " user(s) on the next page.");
+}
 User otherUser = usersResponse.getUsersList().stream().filter(u -> u.getName().equals("anotheruser")).findFirst().orElse(null);
 
+// --- 4. Chat Operations & Streaming ---
 if (otherUser != null) {
-    // Create a chat
-    CreateChatRequest createChatRequest = CreateChatRequest.newBuilder()
-        .setReceiverId(otherUser.getId())
-        .setSenderEncryptedAesKey(ByteString.copyFrom(new byte[32]))
-        .setReceiverEncryptedAesKey(ByteString.copyFrom(new byte[32]))
-        .build();
-    chat.Chat newChat = authedChatStub.createChat(createChatRequest);
+    chat.Chat newChat = authedChatStub.createChat(CreateChatRequest.newBuilder().setReceiverId(otherUser.getId()).build());
     System.out.println("Created chat with ID: " + newChat.getId());
 
-    // --- 5. Real-time Chat Stream ---
     CountDownLatch latch = new CountDownLatch(1);
-    StreamObserver<ServerToClientMessage> responseObserver = new StreamObserver<>() {
-        public void onNext(ServerToClientMessage value) {
-            System.out.println("Received message: " + value.getNewMessage().getAesEncryptedContent().toStringUtf8());
-        }
+    StreamObserver<ClientToServerMessage> req = authedAsyncChatStub.chatStream(new StreamObserver<>() {
+        public void onNext(ServerToClientMessage v) { System.out.println("Received: " + v.getNewMessage().getAesEncryptedContent().toStringUtf8()); }
         public void onError(Throwable t) { latch.countDown(); }
         public void onCompleted() { latch.countDown(); }
-    };
-    StreamObserver<ClientToServerMessage> requestObserver = authedAsyncChatStub.chatStream(responseObserver);
-    SendMessageRequest message = SendMessageRequest.newBuilder()
-        .setChatId(newChat.getId())
-        .setAesEncryptedContent(ByteString.copyFromUtf8("Hello from Java!"))
-        .build();
-    requestObserver.onNext(ClientToServerMessage.newBuilder().setSendMessage(message).build());
-    requestObserver.onCompleted();
+    });
+    req.onNext(ClientToServerMessage.newBuilder().setSendMessage(SendMessageRequest.newBuilder().setChatId(newChat.getId()).setAesEncryptedContent(ByteString.copyFromUtf8("Hello!")).build()).build());
+    req.onCompleted();
     latch.await(1, TimeUnit.MINUTES);
 }
 
-// --- 6. Refreshing and Logging out ---
+// --- 5. Refreshing and Logging out ---
 refreshToken = authStub.refresh(RefreshRequest.newBuilder().setRefreshToken(refreshToken).build()).getRefreshToken();
-System.out.println("Token refreshed!");
 authStub.logout(LogoutRequest.newBuilder().setRefreshToken(refreshToken).build());
 System.out.println("Logged out.");
 ```
