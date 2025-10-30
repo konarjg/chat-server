@@ -18,16 +18,16 @@ This architecture is visualized in the diagram below:
 graph TB
   subgraph "Hexagonal Architecture"
     direction TB
-    subgraph "<font size=5><b>Application Layer</b></font>"
+    subgraph "Application Layer"
         style Application_Layer stroke:#4CAF50,stroke-width:2px
         GRPC["gRPC Services (Adapter)"]
     end
-    subgraph "<font size=5><b>Domain Layer</b></font>"
+    subgraph "Domain Layer"
         style Domain_Layer stroke:#FFC107,stroke-width:4px
-        Ports["<b>Ports</b><br/>(Service & Repository Interfaces)"]
+        Ports["Ports (Service & Repository Interfaces)"]
         Domain["Core Domain Logic & Entities"]
     end
-    subgraph "<font size=5><b>Infrastructure Layer</b></font>"
+    subgraph "Infrastructure Layer"
         style Infrastructure_Layer stroke:#F44336,stroke-width:2px
         Repos["Repositories (Adapter)"]
         Auth["Auth Services (Adapter)"]
@@ -127,17 +127,8 @@ Console.WriteLine("Logged in successfully!");
 
 // --- 3. Making Authenticated Calls & Pagination ---
 var headers = new Metadata { { "Authorization", $"Bearer {accessToken}" } };
-var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest { PageSize = 1 }, headers);
-Console.WriteLine($"Found {usersResponse.Users.Count} user(s) on the first page.");
-
-if (usersResponse.Users.Count > 0)
-{
-    int lastId = usersResponse.Users.Last().Id;
-    var nextPageRequest = new GetUsersRequest { PageSize = 1, LastId = lastId };
-    var nextPageResponse = await userClient.GetUsersAsync(nextPageRequest, headers);
-    Console.WriteLine($"Found {nextPageResponse.Users.Count} user(s) on the next page.");
-}
-
+var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest { PageSize = 10 }, headers);
+Console.WriteLine($"Found {usersResponse.Users.Count} user(s).");
 var otherUser = usersResponse.Users.FirstOrDefault(u => u.Name == "anotheruser");
 
 // --- 4. Chat Operations ---
@@ -192,15 +183,8 @@ print("Logged in successfully!")
 
 # --- 3. Making Authenticated Calls & Pagination ---
 auth_metadata = [('authorization', f'Bearer {access_token}')]
-users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(page_size=1), metadata=auth_metadata)
-print(f"Found {len(users_response.users)} user(s) on the first page.")
-
-if len(users_response.users) > 0:
-    last_id = users_response.users[-1].id
-    next_page_request = chat_pb2.GetUsersRequest(page_size=1, last_id=last_id)
-    next_page_response = user_stub.GetUsers(next_page_request, metadata=auth_metadata)
-    print(f"Found {len(next_page_response.users)} user(s) on the next page.")
-
+users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(page_size=10), metadata=auth_metadata)
+print(f"Found {len(users_response.users)} user(s).")
 other_user = next((u for u in users_response.users if u.name == "anotheruser"), None)
 
 # --- 4. Chat Operations ---
@@ -265,19 +249,18 @@ UserServiceGrpc.UserServiceBlockingStub authedUserStub = userStub.withIntercepto
 ChatServiceGrpc.ChatServiceBlockingStub authedChatStub = chatStub.withInterceptors(authInterceptor);
 ChatServiceGrpc.ChatServiceStub authedAsyncChatStub = asyncChatStub.withInterceptors(authInterceptor);
 
-GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(1).build());
-System.out.println("Found " + usersResponse.getUsersCount() + " user(s) on the first page.");
-
-if (usersResponse.getUsersCount() > 0) {
-    int lastId = usersResponse.getUsers(usersResponse.getUsersCount() - 1).getId();
-    GetUsersResponse nextPage = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(1).setLastId(lastId).build());
-    System.out.println("Found " + nextPage.getUsersCount() + " user(s) on the next page.");
-}
+GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(10).build());
+System.out.println("Found " + usersResponse.getUsersCount() + " user(s).");
 User otherUser = usersResponse.getUsersList().stream().filter(u -> u.getName().equals("anotheruser")).findFirst().orElse(null);
 
 // --- 4. Chat Operations & Streaming ---
 if (otherUser != null) {
-    chat.Chat newChat = authedChatStub.createChat(CreateChatRequest.newBuilder().setReceiverId(otherUser.getId()).build());
+    CreateChatRequest createChatRequest = CreateChatRequest.newBuilder()
+        .setReceiverId(otherUser.getId())
+        .setSenderEncryptedAesKey(ByteString.copyFrom(new byte[32]))
+        .setReceiverEncryptedAesKey(ByteString.copyFrom(new byte[32]))
+        .build();
+    chat.Chat newChat = authedChatStub.createChat(createChatRequest);
     System.out.println("Created chat with ID: " + newChat.getId());
 
     CountDownLatch latch = new CountDownLatch(1);
