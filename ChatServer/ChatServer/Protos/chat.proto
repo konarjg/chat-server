@@ -61,7 +61,9 @@ message RefreshRequest {
   string refresh_token = 1;
 }
 
-message LogoutRequest {}
+message LogoutRequest {
+  string refresh_token = 1;
+}
 
 message LogoutResponse {
   string message = 1;

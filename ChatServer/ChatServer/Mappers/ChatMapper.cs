@@ -25,7 +25,7 @@ public static class ChatMapper {
   public static ChatFilters ToFilters(GetChatsRequest request,
     int senderId) {
     
-    return new ChatFilters(senderId,request.PageSize,request.LastId);
+    return new ChatFilters(senderId,request.PageSize,request.HasLastId ? request.LastId : null);
   }
 
   public static GetChatsResponse ToResponse(PagedResult<Chat> chats) {
