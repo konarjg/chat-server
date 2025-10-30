@@ -12,46 +12,6 @@ The application is designed around a central **Domain Layer**, which contains th
 
 -   **Infrastructure Layer (Driven Adapters)**: This layer contains the "driven" adapters that provide concrete implementations for the domain's outbound ports. This includes database repositories, authentication services, and real-time messaging clients that are "driven" by the application core.
 
-This architecture is visualized in the diagram below:
-
-```mermaid
-graph LR
-
-    subgraph "Driving Side"
-        Clients(["Clients"])
-        subgraph "Application Layer"
-            style AppLayer stroke:#4CAF50,stroke-width:2px,fill:#e8f5e9
-            GRPC["gRPC Services <br/> (Driving Adapter)"]
-        end
-    end
-
-    subgraph "Domain"
-         style DomainHexagon stroke:#FFC107,stroke-width:4px,fill:#fffbe6
-         Core["Core Business Logic <br/> & Entities"]
-    end
-
-    subgraph "Driven Side"
-        subgraph "Infrastructure Layer"
-             style InfraLayer stroke:#F44336,stroke-width:2px,fill:#ffebee
-             DB_Adapter["Database Adapter <br/> (Repositories)"]
-             Auth_Adapter["Auth Adapter <br/> (Security Services)"]
-             Realtime_Adapter["Realtime Adapter <br/> (Message Broadcaster)"]
-        end
-        Database[(Database)]
-    end
-
-    %% Connections show flow of control
-    Clients -- "sends gRPC requests" --> GRPC
-
-    GRPC -- "calls (Inbound Ports / Interfaces)" --> Core
-
-    Core -- "calls (Outbound Ports / Interfaces)" --> DB_Adapter
-    Core -- "calls (Outbound Ports / Interfaces)" --> Auth_Adapter
-    Core -- "calls (Outbound Ports / Interfaces)" --> Realtime_Adapter
-
-    DB_Adapter -- "persists data to" --> Database
-```
-
 ### Project Structure
 
 *   `ChatServer/`: The main project, containing the gRPC services and the application's entry point (Application Layer).
