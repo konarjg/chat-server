@@ -6,48 +6,50 @@ This project is a gRPC-based chat server built with ASP.NET Core, following the 
 
 The application is designed around a central **Domain Layer**, which contains the core business logic and is completely independent of any external technologies. This core is surrounded by an **Application Layer** and an **Infrastructure Layer**.
 
--   **Domain Layer (The Hexagon)**: This is the heart of the application, containing the business logic, entities, and the all-important **Ports**. Ports are interfaces that define how the outside world can interact with the domain (inbound ports) and how the domain can interact with the outside world (outbound ports).
+-   **Domain Layer (The Hexagon)**: This is the heart of the application, containing the business logic, entities, and the all-important **Ports**. Ports are interfaces that define how the application's core logic is invoked (inbound ports) and how the core communicates with external systems like databases (outbound ports).
 
--   **Application Layer (Driving Adapters)**: This layer contains the "driving" adapters that translate external requests into calls to the domain's inbound ports. In this project, the gRPC services act as the primary driving adapter.
+-   **Application Layer (Driving Adapters)**: This layer contains the "driving" adapters that translate external requests into calls on the domain's inbound ports. In this project, the gRPC services act as the primary driving adapter, receiving commands from clients.
 
--   **Infrastructure Layer (Driven Adapters)**: This layer contains the "driven" adapters that provide concrete implementations for the domain's outbound ports. This includes database repositories, authentication services, and real-time messaging clients.
+-   **Infrastructure Layer (Driven Adapters)**: This layer contains the "driven" adapters that provide concrete implementations for the domain's outbound ports. This includes database repositories, authentication services, and real-time messaging clients that are "driven" by the application core.
 
 This architecture is visualized in the diagram below:
 
 ```mermaid
-graph TB
-  subgraph "Hexagonal Architecture"
-    direction TB
-    subgraph "Application Layer"
-        style Application_Layer stroke:#4CAF50,stroke-width:2px
-        GRPC["gRPC Services (Adapter)"]
-    end
-    subgraph "Domain Layer"
-        style Domain_Layer stroke:#FFC107,stroke-width:4px
-        Ports["Ports (Service & Repository Interfaces)"]
-        Domain["Core Domain Logic & Entities"]
-    end
-    subgraph "Infrastructure Layer"
-        style Infrastructure_Layer stroke:#F44336,stroke-width:2px
-        Repos["Repositories (Adapter)"]
-        Auth["Auth Services (Adapter)"]
-        Realtime["Realtime (Adapter)"]
-    end
-  end
+graph LR
 
-  subgraph "External"
-    Clients(["Clients"])
-    DB[(Database)]
-  end
+    subgraph "Driving Side"
+        Clients(["Clients"])
+        subgraph "Application Layer"
+            style AppLayer stroke:#4CAF50,stroke-width:2px,fill:#e8f5e9
+            GRPC["gRPC Services <br/> (Driving Adapter)"]
+        end
+    end
 
-  Clients --> GRPC
-  GRPC --> Ports
-  Ports -- defines --> Domain
-  Domain -- uses --> Ports
-  Repos --> Ports
-  Auth --> Ports
-  Realtime --> Ports
-  Repos --> DB
+    subgraph "Domain"
+         style DomainHexagon stroke:#FFC107,stroke-width:4px,fill:#fffbe6
+         Core["Core Business Logic <br/> & Entities"]
+    end
+
+    subgraph "Driven Side"
+        subgraph "Infrastructure Layer"
+             style InfraLayer stroke:#F44336,stroke-width:2px,fill:#ffebee
+             DB_Adapter["Database Adapter <br/> (Repositories)"]
+             Auth_Adapter["Auth Adapter <br/> (Security Services)"]
+             Realtime_Adapter["Realtime Adapter <br/> (Message Broadcaster)"]
+        end
+        Database[(Database)]
+    end
+
+    %% Connections show flow of control
+    Clients -- "sends gRPC requests" --> GRPC
+
+    GRPC -- "calls (Inbound Ports / Interfaces)" --> Core
+
+    Core -- "calls (Outbound Ports / Interfaces)" --> DB_Adapter
+    Core -- "calls (Outbound Ports / Interfaces)" --> Auth_Adapter
+    Core -- "calls (Outbound Ports / Interfaces)" --> Realtime_Adapter
+
+    DB_Adapter -- "persists data to" --> Database
 ```
 
 ### Project Structure
