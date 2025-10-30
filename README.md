@@ -60,8 +60,8 @@ To run the server, you will need the .NET 9 SDK installed.
 1.  **Clone the repository:**
 
     ```bash
-    git clone https://github.com/your-username/ChatServer.git
-    cd ChatServer
+    git clone https://github.com/konarjg/chat-server.git
+    cd chat-server
     ```
 
 2.  **Restore dependencies:**
@@ -95,37 +95,46 @@ Here are some examples of how to use the gRPC client in different languages. The
 ### C#
 
 ```csharp
+using Grpc.Core;
 using Grpc.Net.Client;
 using Chat;
 
-// Create a channel
+// --- 1. Setup ---
 using var channel = GrpcChannel.ForAddress("http://localhost:5241");
-
-// Create clients
 var authClient = new AuthService.AuthServiceClient(channel);
-var chatClient = new ChatService.ChatServiceClient(channel);
 var userClient = new UserService.UserServiceClient(channel);
+var chatClient = new ChatService.ChatServiceClient(channel);
 
-// Register a new user
-var registerResponse = await authClient.RegisterAsync(new RegisterRequest
-{
-    Name = "testuser",
-    Password = "password",
-    PublicKey = "your_public_key"
-});
+// --- 2. Register and Login ---
+await authClient.RegisterAsync(new RegisterRequest { Name = "testuser", Password = "password", PublicKey = "key" });
+var loginResponse = await authClient.LoginAsync(new LoginRequest { Name = "testuser", Password = "password" });
+string accessToken = loginResponse.AccessToken;
+string refreshToken = loginResponse.RefreshToken;
+Console.WriteLine("Logged in successfully!");
 
-// Login
-var loginResponse = await authClient.LoginAsync(new LoginRequest
-{
-    Name = "testuser",
-    Password = "password"
-});
+// --- 3. Making Authenticated Calls ---
+var headers = new Metadata { { "Authorization", $"Bearer {accessToken}" } };
+var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest { PageSize = 10 }, headers);
+Console.WriteLine($"Found {usersResponse.Users.Count} users.");
 
-// Get a list of users
-var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest
+// --- 4. Handling Pagination ---
+if (usersResponse.Users.Count > 0)
 {
-    PageSize = 10
-});
+    int lastId = usersResponse.Users.Last().Id;
+    var nextPageRequest = new GetUsersRequest { PageSize = 10, LastId = lastId };
+    var nextPageResponse = await userClient.GetUsersAsync(nextPageRequest, headers);
+    Console.WriteLine($"Found {nextPageResponse.Users.Count} users on the next page.");
+}
+
+// --- 5. Refreshing the Access Token ---
+var refreshResponse = await authClient.RefreshAsync(new RefreshRequest { RefreshToken = refreshToken });
+accessToken = refreshResponse.AccessToken;
+refreshToken = refreshResponse.RefreshToken;
+Console.WriteLine("Token refreshed!");
+
+// --- 6. Logging Out ---
+await authClient.LogoutAsync(new LogoutRequest { RefreshToken = refreshToken });
+Console.WriteLine("Logged out.");
 ```
 
 ### Python
@@ -135,68 +144,96 @@ import grpc
 import chat_pb2
 import chat_pb2_grpc
 
-# Create a channel
+# --- 1. Setup ---
 channel = grpc.insecure_channel('localhost:5241')
-
-# Create stubs
 auth_stub = chat_pb2_grpc.AuthServiceStub(channel)
-chat_stub = chat_pb2_grpc.ChatServiceStub(channel)
 user_stub = chat_pb2_grpc.UserServiceStub(channel)
+chat_stub = chat_pb2_grpc.ChatServiceStub(channel)
 
-# Register a new user
-register_response = auth_stub.Register(chat_pb2.RegisterRequest(
-    name='testuser',
-    password='password',
-    public_key='your_public_key'
-))
+# --- 2. Register and Login ---
+auth_stub.Register(chat_pb2.RegisterRequest(name='testuser', password='password', public_key='key'))
+login_response = auth_stub.Login(chat_pb2.LoginRequest(name='testuser', password='password'))
+access_token = login_response.access_token
+refresh_token = login_response.refresh_token
+print("Logged in successfully!")
 
-# Login
-login_response = auth_stub.Login(chat_pb2.LoginRequest(
-    name='testuser',
-    password='password'
-))
+# --- 3. Making Authenticated Calls ---
+auth_metadata = [('authorization', f'Bearer {access_token}')]
+users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(page_size=10), metadata=auth_metadata)
+print(f"Found {len(users_response.users)} users.")
 
-# Get a list of users
-users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(
-    page_size=10
-))
+# --- 4. Handling Pagination ---
+if len(users_response.users) > 0:
+    last_id = users_response.users[-1].id
+    next_page_request = chat_pb2.GetUsersRequest(page_size=10, last_id=last_id)
+    next_page_response = user_stub.GetUsers(next_page_request, metadata=auth_metadata)
+    print(f"Found {len(next_page_response.users)} users on the next page.")
+
+# --- 5. Refreshing the Access Token ---
+refresh_response = auth_stub.Refresh(chat_pb2.RefreshRequest(refresh_token=refresh_token))
+access_token = refresh_response.access_token
+refresh_token = refresh_response.refresh_token
+print("Token refreshed!")
+
+# --- 6. Logging Out ---
+auth_stub.Logout(chat_pb2.LogoutRequest(refresh_token=refresh_token))
+print("Logged out.")
 ```
 
 ### Java
 
 ```java
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
+import io.grpc.*;
 import chat.Chat.*;
 import chat.AuthServiceGrpc;
 import chat.ChatServiceGrpc;
 import chat.UserServiceGrpc;
 
-// Create a channel
-ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 5241)
-    .usePlaintext()
-    .build();
-
-// Create stubs
+// --- 1. Setup ---
+ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 5241).usePlaintext().build();
 AuthServiceGrpc.AuthServiceBlockingStub authStub = AuthServiceGrpc.newBlockingStub(channel);
-ChatServiceGrpc.ChatServiceBlockingStub chatStub = ChatServiceGrpc.newBlockingStub(channel);
 UserServiceGrpc.UserServiceBlockingStub userStub = UserServiceGrpc.newBlockingStub(channel);
+ChatServiceGrpc.ChatServiceBlockingStub chatStub = ChatServiceGrpc.newBlockingStub(channel);
 
-// Register a new user
-AuthResponse registerResponse = authStub.register(RegisterRequest.newBuilder()
-    .setName("testuser")
-    .setPassword("password")
-    .setPublicKey("your_public_key")
-    .build());
+// --- 2. Register and Login ---
+authStub.register(RegisterRequest.newBuilder().setName("testuser").setPassword("password").setPublicKey("key").build());
+AuthResponse loginResponse = authStub.login(LoginRequest.newBuilder().setName("testuser").setPassword("password").build());
+String accessToken = loginResponse.getAccessToken();
+String refreshToken = loginResponse.getRefreshToken();
+System.out.println("Logged in successfully!");
 
-// Login
-AuthResponse loginResponse = authStub.login(LoginRequest.newBuilder()
-    .setName("testuser")
-    .setPassword("password")
-    .build());
+// --- 3. Making Authenticated Calls ---
+ClientInterceptor authInterceptor = new ClientInterceptor() {
+    @Override
+    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
+        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(next.newCall(method, callOptions)) {
+            @Override
+            public void start(Listener<RespT> responseListener, Metadata headers) {
+                headers.put(Metadata.Key.of("Authorization", Metadata.ASCII_STRING_MARSHALLER), "Bearer " + accessToken);
+                super.start(responseListener, headers);
+            }
+        };
+    }
+};
+UserServiceGrpc.UserServiceBlockingStub authedUserStub = userStub.withInterceptors(authInterceptor);
+GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(10).build());
+System.out.println("Found " + usersResponse.getUsersCount() + " users.");
 
-// Get a list of users
-GetUsersResponse usersResponse = userStub.getUsers(GetUsersRequest.newBuilder()
-    .setPageSize(10)
-    .build());
+// --- 4. Handling Pagination ---
+if (usersResponse.getUsersCount() > 0) {
+    int lastId = usersResponse.getUsers(usersResponse.getUsersCount() - 1).getId();
+    GetUsersRequest nextPageRequest = GetUsersRequest.newBuilder().setPageSize(10).setLastId(lastId).build();
+    GetUsersResponse nextPageResponse = authedUserStub.getUsers(nextPageRequest);
+    System.out.println("Found " + nextPageResponse.getUsersCount() + " users on the next page.");
+}
+
+// --- 5. Refreshing the Access Token ---
+AuthResponse refreshResponse = authStub.refresh(RefreshRequest.newBuilder().setRefreshToken(refreshToken).build());
+accessToken = refreshResponse.getAccessToken();
+// refreshToken = refreshResponse.getRefreshToken(); // Update refresh token if server rotates it
+System.out.println("Token refreshed!");
+
+// --- 6. Logging Out ---
+authStub.logout(LogoutRequest.newBuilder().setRefreshToken(refreshToken).build());
+System.out.println("Logged out.");
 ```
