@@ -98,6 +98,7 @@ Here are some examples of how to use the gRPC client in different languages. The
 using Grpc.Core;
 using Grpc.Net.Client;
 using Chat;
+using Google.Protobuf;
 
 // --- 1. Setup ---
 using var channel = GrpcChannel.ForAddress("http://localhost:5241");
@@ -107,6 +108,7 @@ var chatClient = new ChatService.ChatServiceClient(channel);
 
 // --- 2. Register and Login ---
 await authClient.RegisterAsync(new RegisterRequest { Name = "testuser", Password = "password", PublicKey = "key" });
+await authClient.RegisterAsync(new RegisterRequest { Name = "anotheruser", Password = "password", PublicKey = "key2" });
 var loginResponse = await authClient.LoginAsync(new LoginRequest { Name = "testuser", Password = "password" });
 string accessToken = loginResponse.AccessToken;
 string refreshToken = loginResponse.RefreshToken;
@@ -115,24 +117,55 @@ Console.WriteLine("Logged in successfully!");
 // --- 3. Making Authenticated Calls ---
 var headers = new Metadata { { "Authorization", $"Bearer {accessToken}" } };
 var usersResponse = await userClient.GetUsersAsync(new GetUsersRequest { PageSize = 10 }, headers);
+var otherUser = usersResponse.Users.FirstOrDefault(u => u.Name == "anotheruser");
 Console.WriteLine($"Found {usersResponse.Users.Count} users.");
 
-// --- 4. Handling Pagination ---
-if (usersResponse.Users.Count > 0)
+// --- 4. Chat Operations ---
+if (otherUser != null)
 {
-    int lastId = usersResponse.Users.Last().Id;
-    var nextPageRequest = new GetUsersRequest { PageSize = 10, LastId = lastId };
-    var nextPageResponse = await userClient.GetUsersAsync(nextPageRequest, headers);
-    Console.WriteLine($"Found {nextPageResponse.Users.Count} users on the next page.");
+    // Create a chat
+    var createChatRequest = new CreateChatRequest
+    {
+        ReceiverId = otherUser.Id,
+        SenderEncryptedAesKey = ByteString.CopyFrom(new byte[32]),
+        ReceiverEncryptedAesKey = ByteString.CopyFrom(new byte[32])
+    };
+    var chat = await chatClient.CreateChatAsync(createChatRequest, headers);
+    Console.WriteLine($"Created chat with ID: {chat.Id}");
+
+    // Get message history (will be empty)
+    var historyRequest = new GetMessageHistoryRequest { ChatId = chat.Id, PageSize = 20 };
+    var historyResponse = await chatClient.GetMessageHistoryAsync(historyRequest, headers);
+    Console.WriteLine($"Initial message count: {historyResponse.Messages.Count}");
+
+    // --- 5. Real-time Chat Stream ---
+    using var call = chatClient.ChatStream(headers);
+
+    // Task to receive messages from the server
+    var readTask = Task.Run(async () =>
+    {
+        await foreach (var message in call.ResponseStream.ReadAllAsync())
+        {
+            Console.WriteLine($"Received message: {message.NewMessage.AesEncryptedContent.ToStringUtf8()}");
+        }
+    });
+
+    // Send a message
+    var sendMessageRequest = new SendMessageRequest { ChatId = chat.Id, AesEncryptedContent = ByteString.CopyFromUtf8("Hello, world!") };
+    await call.RequestStream.WriteAsync(new ClientToServerMessage { SendMessage = sendMessageRequest });
+
+    await Task.Delay(1000); // Wait for message to be received
+
+    await call.RequestStream.CompleteAsync();
+    await readTask;
 }
 
-// --- 5. Refreshing the Access Token ---
+// --- 6. Refreshing the Access Token ---
 var refreshResponse = await authClient.RefreshAsync(new RefreshRequest { RefreshToken = refreshToken });
 accessToken = refreshResponse.AccessToken;
-refreshToken = refreshResponse.RefreshToken;
 Console.WriteLine("Token refreshed!");
 
-// --- 6. Logging Out ---
+// --- 7. Logging Out ---
 await authClient.LogoutAsync(new LogoutRequest { RefreshToken = refreshToken });
 Console.WriteLine("Logged out.");
 ```
@@ -143,6 +176,8 @@ Console.WriteLine("Logged out.");
 import grpc
 import chat_pb2
 import chat_pb2_grpc
+import threading
+import time
 
 # --- 1. Setup ---
 channel = grpc.insecure_channel('localhost:5241')
@@ -152,6 +187,7 @@ chat_stub = chat_pb2_grpc.ChatServiceStub(channel)
 
 # --- 2. Register and Login ---
 auth_stub.Register(chat_pb2.RegisterRequest(name='testuser', password='password', public_key='key'))
+auth_stub.Register(chat_pb2.RegisterRequest(name='anotheruser', password='password', public_key='key2'))
 login_response = auth_stub.Login(chat_pb2.LoginRequest(name='testuser', password='password'))
 access_token = login_response.access_token
 refresh_token = login_response.refresh_token
@@ -160,22 +196,37 @@ print("Logged in successfully!")
 # --- 3. Making Authenticated Calls ---
 auth_metadata = [('authorization', f'Bearer {access_token}')]
 users_response = user_stub.GetUsers(chat_pb2.GetUsersRequest(page_size=10), metadata=auth_metadata)
+other_user = next((u for u in users_response.users if u.name == "anotheruser"), None)
 print(f"Found {len(users_response.users)} users.")
 
-# --- 4. Handling Pagination ---
-if len(users_response.users) > 0:
-    last_id = users_response.users[-1].id
-    next_page_request = chat_pb2.GetUsersRequest(page_size=10, last_id=last_id)
-    next_page_response = user_stub.GetUsers(next_page_request, metadata=auth_metadata)
-    print(f"Found {len(next_page_response.users)} users on the next page.")
+# --- 4. Chat Operations ---
+if other_user:
+    # Create a chat
+    create_chat_request = chat_pb2.CreateChatRequest(receiver_id=other_user.id, sender_encrypted_aes_key=b'x'*32, receiver_encrypted_aes_key=b'y'*32)
+    chat = chat_stub.CreateChat(create_chat_request, metadata=auth_metadata)
+    print(f"Created chat with ID: {chat.id}")
 
-# --- 5. Refreshing the Access Token ---
+    # Get message history
+    history_request = chat_pb2.GetMessageHistoryRequest(chat_id=chat.id, page_size=20)
+    history_response = chat_stub.GetMessageHistory(history_request, metadata=auth_metadata)
+    print(f"Initial message count: {len(history_response.messages)}")
+
+    # --- 5. Real-time Chat Stream ---
+    def send_messages():
+        time.sleep(1) # wait for receiver to be ready
+        message = chat_pb2.SendMessageRequest(chat_id=chat.id, aes_encrypted_content=b"Hello from Python!")
+        yield chat_pb2.ClientToServerMessage(send_message=message)
+
+    responses = chat_stub.ChatStream(send_messages(), metadata=auth_metadata)
+    for response in responses:
+        print(f"Received message: {response.new_message.aes_encrypted_content.decode('utf-8')}")
+
+# --- 6. Refreshing the Access Token ---
 refresh_response = auth_stub.Refresh(chat_pb2.RefreshRequest(refresh_token=refresh_token))
 access_token = refresh_response.access_token
-refresh_token = refresh_response.refresh_token
 print("Token refreshed!")
 
-# --- 6. Logging Out ---
+# --- 7. Logging Out ---
 auth_stub.Logout(chat_pb2.LogoutRequest(refresh_token=refresh_token))
 print("Logged out.")
 ```
@@ -184,30 +235,34 @@ print("Logged out.")
 
 ```java
 import io.grpc.*;
+import io.grpc.stub.StreamObserver;
 import chat.Chat.*;
 import chat.AuthServiceGrpc;
 import chat.ChatServiceGrpc;
 import chat.UserServiceGrpc;
+import com.google.protobuf.ByteString;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 // --- 1. Setup ---
 ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 5241).usePlaintext().build();
 AuthServiceGrpc.AuthServiceBlockingStub authStub = AuthServiceGrpc.newBlockingStub(channel);
 UserServiceGrpc.UserServiceBlockingStub userStub = UserServiceGrpc.newBlockingStub(channel);
 ChatServiceGrpc.ChatServiceBlockingStub chatStub = ChatServiceGrpc.newBlockingStub(channel);
+ChatServiceGrpc.ChatServiceStub asyncChatStub = ChatServiceGrpc.newStub(channel);
 
 // --- 2. Register and Login ---
 authStub.register(RegisterRequest.newBuilder().setName("testuser").setPassword("password").setPublicKey("key").build());
+authStub.register(RegisterRequest.newBuilder().setName("anotheruser").setPassword("password").setPublicKey("key2").build());
 AuthResponse loginResponse = authStub.login(LoginRequest.newBuilder().setName("testuser").setPassword("password").build());
-String accessToken = loginResponse.getAccessToken();
+final String accessToken = loginResponse.getAccessToken();
 String refreshToken = loginResponse.getRefreshToken();
 System.out.println("Logged in successfully!");
 
-// --- 3. Making Authenticated Calls ---
+// --- 3. Authenticated Stubs ---
 ClientInterceptor authInterceptor = new ClientInterceptor() {
-    @Override
     public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
         return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(next.newCall(method, callOptions)) {
-            @Override
             public void start(Listener<RespT> responseListener, Metadata headers) {
                 headers.put(Metadata.Key.of("Authorization", Metadata.ASCII_STRING_MARSHALLER), "Bearer " + accessToken);
                 super.start(responseListener, headers);
@@ -216,24 +271,45 @@ ClientInterceptor authInterceptor = new ClientInterceptor() {
     }
 };
 UserServiceGrpc.UserServiceBlockingStub authedUserStub = userStub.withInterceptors(authInterceptor);
-GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(10).build());
-System.out.println("Found " + usersResponse.getUsersCount() + " users.");
+ChatServiceGrpc.ChatServiceBlockingStub authedChatStub = chatStub.withInterceptors(authInterceptor);
+ChatServiceGrpc.ChatServiceStub authedAsyncChatStub = asyncChatStub.withInterceptors(authInterceptor);
 
-// --- 4. Handling Pagination ---
-if (usersResponse.getUsersCount() > 0) {
-    int lastId = usersResponse.getUsers(usersResponse.getUsersCount() - 1).getId();
-    GetUsersRequest nextPageRequest = GetUsersRequest.newBuilder().setPageSize(10).setLastId(lastId).build();
-    GetUsersResponse nextPageResponse = authedUserStub.getUsers(nextPageRequest);
-    System.out.println("Found " + nextPageResponse.getUsersCount() + " users on the next page.");
+// --- 4. Chat Operations ---
+GetUsersResponse usersResponse = authedUserStub.getUsers(GetUsersRequest.newBuilder().setPageSize(10).build());
+User otherUser = usersResponse.getUsersList().stream().filter(u -> u.getName().equals("anotheruser")).findFirst().orElse(null);
+
+if (otherUser != null) {
+    // Create a chat
+    CreateChatRequest createChatRequest = CreateChatRequest.newBuilder()
+        .setReceiverId(otherUser.getId())
+        .setSenderEncryptedAesKey(ByteString.copyFrom(new byte[32]))
+        .setReceiverEncryptedAesKey(ByteString.copyFrom(new byte[32]))
+        .build();
+    chat.Chat newChat = authedChatStub.createChat(createChatRequest);
+    System.out.println("Created chat with ID: " + newChat.getId());
+
+    // --- 5. Real-time Chat Stream ---
+    CountDownLatch latch = new CountDownLatch(1);
+    StreamObserver<ServerToClientMessage> responseObserver = new StreamObserver<>() {
+        public void onNext(ServerToClientMessage value) {
+            System.out.println("Received message: " + value.getNewMessage().getAesEncryptedContent().toStringUtf8());
+        }
+        public void onError(Throwable t) { latch.countDown(); }
+        public void onCompleted() { latch.countDown(); }
+    };
+    StreamObserver<ClientToServerMessage> requestObserver = authedAsyncChatStub.chatStream(responseObserver);
+    SendMessageRequest message = SendMessageRequest.newBuilder()
+        .setChatId(newChat.getId())
+        .setAesEncryptedContent(ByteString.copyFromUtf8("Hello from Java!"))
+        .build();
+    requestObserver.onNext(ClientToServerMessage.newBuilder().setSendMessage(message).build());
+    requestObserver.onCompleted();
+    latch.await(1, TimeUnit.MINUTES);
 }
 
-// --- 5. Refreshing the Access Token ---
-AuthResponse refreshResponse = authStub.refresh(RefreshRequest.newBuilder().setRefreshToken(refreshToken).build());
-accessToken = refreshResponse.getAccessToken();
-// refreshToken = refreshResponse.getRefreshToken(); // Update refresh token if server rotates it
+// --- 6. Refreshing and Logging out ---
+refreshToken = authStub.refresh(RefreshRequest.newBuilder().setRefreshToken(refreshToken).build()).getRefreshToken();
 System.out.println("Token refreshed!");
-
-// --- 6. Logging Out ---
 authStub.logout(LogoutRequest.newBuilder().setRefreshToken(refreshToken).build());
 System.out.println("Logged out.");
 ```
